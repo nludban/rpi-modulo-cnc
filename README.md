@@ -1,2 +1,3 @@
 # rpi-modulo-cnc
-CNC controller for Raspberry Pi
+
+Modular CNC controller with Go, Raspberry pi, and pico
