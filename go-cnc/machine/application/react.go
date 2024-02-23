@@ -90,36 +90,10 @@ func init() {
 var (
 	cncSecrets = Secrets{}
 
-	// "To call your API you should use the access_token instead of the id_token"
-
-	// https://manage.auth0.com/dashboard/us/dev-<...>/logs -- success only logins.
-
-	// client id?
-
-	// The signing key [secret?] for the token.
-	//signingKey = []byte("...")
-
-	// This actually works for RS256
-/*
-	pubPEM = []byte(`
------BEGIN CERTIFICATE-----
-...
------END CERTIFICATE-----`)
-*/
 	ErrKeyMustBePEMEncoded = errors.New("Invalid Key: Key must be a PEM encoded PKCS1 or PKCS8 key")
 	ErrNotRSAPrivateKey    = errors.New("Key is not a valid RSA private key")
 	ErrNotRSAPublicKey     = errors.New("Key is not a valid RSA public key")
 
-	// The issuer [domain?] of our token.
-	//issuer = "https://dev-<...>.us.auth0.com/" // XXX full URL required
-
-	// The audience of our token -- who is intended to process the JWT
-	//audience = []string{"https://localhost:3000/my-api-endpoint"}
-
-	// Our token must be signed using this data.
-	//keyFunc = func(ctx context.Context) (interface{}, error) {
-	//	return signingKey, nil
-	//}
 	keyFunc = func(ctx context.Context) (interface{}, error) {
 		key, ok := ParseRSAPublicKeyFromPEM([]byte(cncSecrets.Certificate))
 		//log.Printf("RS256 key=%v ok=%v", key, ok)
@@ -235,41 +209,6 @@ func JokeHandler(c *gin.Context) {
 
 // LikeJoke increments the likes of a particular joke Item
 func LikeJoke(c *gin.Context) {
-
-/*
-	bearerToken := c.Request.Header.Get("Authorization")
-        reqToken := strings.Split(bearerToken, " ")[1]
-	log.Printf("token = %v...", reqToken[:30])
-
-	jwtValidator, err := validator.New(
-		keyFunc,
-		validator.RS256,
-		cncSecrets.Issuer,
-		cncSecrets.Audience,
-		//validator.WithCustomClaims(customClaims),
-		validator.WithAllowedClockSkew(30 * time.Second),
-	)
-	if err != nil {
-		log.Fatalf("failed to set up the validator: %v", err)
-	}
-	foo, err := jwtValidator.ValidateToken(c, reqToken)
-	// could not parse the token: go-jose/go-jose: compact JWS format must have three parts
-	// ok=expected claims not validated: go-jose/go-jose/jwt: validation failed, invalid issuer claim (iss)
-	// ok=expected claims not validated: go-jose/go-jose/jwt: validation failed, token is expired (exp)
-	// validate=&{<nil> {
-	//	https://dev-<...>.us.auth0.com/
-	//	google-oauth2|nnn...nnn
-	//	[ https://localhost:3000/my-api-endpoint
-	//	  https://dev-.<...>.us.auth0.com/userinfo ]
-	// 1708487796 0 1708480596 }
-	// }
-
-
-	log.Printf("validate=%v ok=%v", foo, err)
-	//middleware.CheckJWT(handler).ServeHTTP(ctx.Writer, ctx.Request)
-
-	// ...And process the request anyways...
-*/
 
 	jokeid, err := strconv.Atoi(c.Param("jokeID"))
 	if err != nil {
