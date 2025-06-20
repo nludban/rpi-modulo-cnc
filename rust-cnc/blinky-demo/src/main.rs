@@ -49,6 +49,70 @@ enum MotionCommand {
 
 //---------------------------------------------------------------------
 
+use core::mem::MaybeUninit;
+
+mod app_pins {
+    use crate::hal::{gpio};
+
+    pub type Led = gpio::Pin<gpio::bank0::Gpio25,
+                             gpio::FunctionSio<gpio::SioOutput>,
+                             gpio::PullDown>;
+}
+
+
+struct Globals {
+    i: i32,
+}
+
+impl Globals {
+    fn preinit(& mut self) {
+        self.i = 42;
+    }
+}
+
+
+#[allow(static_mut_refs)]
+static mut G: MaybeUninit<Globals> = MaybeUninit::uninit();
+
+fn new_globals() -> &'static mut Globals {
+    unsafe {
+        #[allow(static_mut_refs)]
+        let p = G.as_mut_ptr();
+        //(*p).preinit();
+        //return p; //G.as_mut_ptr();
+        return p.as_mut().unwrap();
+    }
+}
+
+//---------------------------------------------------------------------
+
+struct AppPins {
+    led: app_pins::Led,
+}
+
+impl AppPins {
+
+    pub fn new(
+        io_bank0: hal::pac::IO_BANK0,
+        pads_bank0: hal::pac::PADS_BANK0,
+        sio_bank0: hal::sio::SioGpioBank0,
+        resets: &mut hal::pac::RESETS,
+    ) -> Self {
+        let pins = hal::gpio::Pins::new(
+            io_bank0,
+            pads_bank0,
+            sio_bank0,
+            resets,
+        );
+
+        AppPins {
+            led: pins.gpio25.into_push_pull_output(),
+        }
+    }
+}
+
+//---------------------------------------------------------------------
+
 #[entry]
 fn main() -> ! {
     info!("Program start");
@@ -72,26 +136,15 @@ fn main() -> ! {
     let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
 
     let sio = hal::Sio::new(pac.SIO);
-    let pins = hal::gpio::Pins::new(
+    let mut app_pins = AppPins::new(
         pac.IO_BANK0,
         pac.PADS_BANK0,
         sio.gpio_bank0,
         &mut pac.RESETS,
     );
 
-    // XXX not for Pico-W
-    let mut led = pins.gpio25.into_push_pull_output();
+    let _g = new_globals();
 
-/*
-    loop {
-        info!("on!");
-        led.set_high().unwrap();
-        delay.delay_ms(500);
-        info!("off!");
-        led.set_low().unwrap();
-        delay.delay_ms(500);
-    }
-*/
     let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
         pac.USBCTRL_REGS,
         pac.USBCTRL_DPRAM,
@@ -128,15 +181,16 @@ fn main() -> ! {
                 let index = 0;
                 for &b in &buf[..count] {
                     if b == b'r' {
-                        led.set_high().unwrap();
+                        app_pins.led.set_high().unwrap();
                     } else {
-                        led.set_low().unwrap();
+                        app_pins.led.set_low().unwrap();
                     }
-                    rsp[index] = b.to_ascii_uppercase();
+                    rsp[index * 2 + 0] = b.to_ascii_uppercase();
+                    rsp[index * 2 + 1] = b.to_ascii_lowercase();
                 }
-                rsp[count + 0] = b'\r';
-                rsp[count + 1] = b'\n';
-                serial.write(&rsp[..count + 2]).unwrap();
+                rsp[count * 2 + 0] = b'\r';
+                rsp[count * 2 + 1] = b'\n';
+                serial.write(&rsp[..count * 2 + 2]).unwrap();
             }
 
         }
