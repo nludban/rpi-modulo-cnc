@@ -111,6 +111,33 @@ impl AppPins {
     }
 }
 
+
+struct Blinker {
+    pin: app_pins::Led,
+    on_off: bool,
+}
+
+impl Blinker {
+    fn new(pin: app_pins::Led) -> Blinker {
+        Blinker { pin, on_off: false }
+    }
+
+    fn blink(&mut self) {
+        if self.on_off {
+            self.pin.set_low().unwrap();
+            self.on_off = false;
+        } else {
+            self.pin.set_high().unwrap();
+            self.on_off = true;
+        }
+    }
+
+    fn on(&mut self) {
+        self.pin.set_high().unwrap();
+        self.on_off = true;
+    }
+}
+
 //---------------------------------------------------------------------
 
 #[entry]
@@ -136,12 +163,15 @@ fn main() -> ! {
     let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
 
     let sio = hal::Sio::new(pac.SIO);
-    let mut app_pins = AppPins::new(
+    let app_pins = AppPins::new(
         pac.IO_BANK0,
         pac.PADS_BANK0,
         sio.gpio_bank0,
         &mut pac.RESETS,
     );
+
+    //let mut led_pin = app_pins.led;
+    let mut blinker = Blinker::new(app_pins.led);
 
     let _g = new_globals();
 
@@ -181,9 +211,11 @@ fn main() -> ! {
                 let index = 0;
                 for &b in &buf[..count] {
                     if b == b'r' {
-                        app_pins.led.set_high().unwrap();
+                        //led_pin.set_high().unwrap();
+                        blinker.on();
                     } else {
-                        app_pins.led.set_low().unwrap();
+                        //led_pin.set_low().unwrap();
+                        blinker.blink();
                     }
                     rsp[index * 2 + 0] = b.to_ascii_uppercase();
                     rsp[index * 2 + 1] = b.to_ascii_lowercase();
