@@ -12,6 +12,21 @@ add_executable(pico-helloworld
 	src/usb_descriptors.c
 )
 
+#$ vcocalc.py 125.000
+# Requested: 125.0 MHz
+# Achieved:  125.0 MHz
+# REFDIV:    1
+# FBDIV:     125 (VCO = 1500.0 MHz)
+# PD1:       6
+# PD2:       2
+target_compile_definitions(pico-helloworld PRIVATE
+	PLL_SYS_REFDIV=1
+	PLL_SYS_VCO_FREQ_HZ=1500000000
+	PLL_SYS_POSTDIV1=6
+	PLL_SYS_POSTDIV2=2
+	SYS_CLK_HZ=125000000
+)
+
 pico_enable_stdio_usb(pico-helloworld 0)
 pico_enable_stdio_uart(pico-helloworld 0)
 

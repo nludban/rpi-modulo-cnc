@@ -7,8 +7,9 @@
 #include <pico/stdlib.h>
 #include <pico/binary_info.h>
 
-#include <hardware/pio.h>
 #include <hardware/clocks.h>
+#include <hardware/pio.h>
+//#include <hardware/pwm.h>
 
 // TinyUSB glue
 #include <bsp/board.h>
@@ -51,6 +52,12 @@ int main() {
    if (board_init_after_tusb)
       board_init_after_tusb();
 
+   // sys_clk = 125 MHz...
+   //uint32_t boot_sys_clk = clock_
+   //set_sys_clock_pll()
+   //set_sys_clock_khz(125 * 1000, true);
+   // pico-sdk/src/rp2_common/hardware_clocks/scripts/vcocalc.py 125.000
+
    gpio_init(LED_PIN);
    gpio_set_dir(LED_PIN, GPIO_OUT);
 
@@ -83,6 +90,35 @@ int main() {
       sleep_ms(1000);
 
    }
+
+   // GP00 => UART0 TX output (debug)?
+
+   // GP01 => 1-kHz interrupt source
+   //	PWM0B = rising edge counter [0-3125) {supervisor or debug}
+   //	GPIO input + interrupt {from psst command pulse = sync/fault}
+
+   // GP02 => command /pulse => synch/fault
+   // GP03 => command data-in
+   // GP04 => command data-out
+   // GP05 => command clock (3.125-MHz)
+/*
+   gpio_set_funtion(5, GPIO_FUNC_PWM);
+   uint slice_45 = pwm_gpio_to_slice_num(5);
+   pwm_set_wrap(slice_45, 40);			// 125-MHz / 40 = 3.125
+   pwm_set_chan_level(slice_45, PWM_CHAN_B, 20); // 50% duty cycle
+   pwm_set_enabled(slice_45, true);
+*/
+   // GP06 => status /pulse => fault
+   // GP07 => status data-in
+   // GP08 => status data-out
+
+   // 9-28 => node specific
+
+   // steppers:
+   // GP22 => step clock input (3.125-MHz)
+   // GP16-21 => 3x {step,dir}
+
+   // PWM -> time counter input [0-10_000)
 
    for (;;) {
       gpio_put(LED_PIN, 0);	// Off
