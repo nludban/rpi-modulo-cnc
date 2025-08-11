@@ -4,23 +4,76 @@
  */
 /*********************************************************************/
 
+#include "sbfmt.h"
+
+#include "ws2812.pio.h"
+
 #include <pico/stdlib.h>
 #include <pico/binary_info.h>
 
 #include <hardware/clocks.h>
+#include <hardware/gpio.h>
+#include <hardware/irq.h>
 #include <hardware/pio.h>
-//#include <hardware/pwm.h>
+#include <hardware/pwm.h>
 
 // TinyUSB glue
-#include <bsp/board.h>
+#include <bsp/board_api.h>	// Also fine: bsp/board.h
 #include <tusb.h>
 
-#include "ws2812.pio.h"
+#include <ctype.h>
 
 //const uint LED_PIN = 25;	// pico (non-W)
 const uint LED_PIN = 13;	// Metro rp2040 "Onboard #13 LED"
 const uint WS2812_PIN = 14;	// Metro rp2040 "Onboard RGB NeoPixel"
 const uint IS_RGBW = 0;
+
+//--------------------------------------------------
+
+void
+enable_led(
+   int			pin
+   )
+{
+   gpio_init(pin);
+   gpio_set_dir(pin, GPIO_OUT);
+}
+
+void
+led_on(int pin)
+{
+   gpio_put(pin, 1);
+}
+
+void
+led_off(int pin)
+{
+   gpio_put(pin, 0);
+}
+
+void
+led_on_off(int pin, int on_off)
+{
+   gpio_put(pin, !!on_off);
+}
+
+//--------------------------------------------------
+
+void
+enable_ws2812_pixel(
+   PIO			*pio,
+   uint			*sm,
+   int			pin
+   )
+{
+   uint offset;
+   (void) pio_claim_free_sm_and_add_program_for_gpio_range(
+      &ws2812_program,
+      pio, sm, &offset,
+      pin, 1, true);
+   ws2812_program_init(*pio, *sm, offset, pin, 800000, IS_RGBW);
+}
+
 
 inline
 uint32_t
@@ -34,23 +87,191 @@ put_pixel(PIO pio, uint sm, uint32_t grbx) {
    pio_sm_put_blocking(pio, sm, grbx);
 }
 
+//--------------------------------------------------
 
-/*
-tusb_rhport_init_t dev_init = {
-   .role = TUSB_ROLE_DEVICE,
-   .speed = TUSB_SPEED_AUTO
+enum {
+  BLINK_NOT_MOUNTED = 250,
+  BLINK_MOUNTED = 1000,
+  BLINK_SUSPENDED = 2500,
 };
-*/
 
-int main() {
+static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
 
-   bi_decl(bi_program_description("First Blink"));
-   bi_decl(bi_1pin_with_name(LED_PIN, "On-board LED"));
+volatile uint pwm_count;
+
+void
+gpio_intr_callback(
+   uint			gpio,
+   uint32_t		event_mask
+   )
+// gpio_irq_callback_t from hardware/GPIO
+// See also irq_handler_t, gpio_add_raw_irq_handler_masked(...)
+{
+   gpio_acknowledge_irq(gpio, event_mask);
+   //...
+}
+
+void
+pwm_intr_handler()
+{
+   pwm_clear_irq(pwm_gpio_to_slice_num(1));
+   pwm_count++;
+}
+
+static
+void
+echo_serial_port(uint8_t itf, uint8_t buf[], uint32_t count)
+{
+  uint8_t const case_diff = 'a' - 'A';
+
+  for (uint32_t i = 0; i < count; i++) {
+    if (itf == 0) {
+      // echo back 1st port as lower case
+      if (isupper(buf[i])) buf[i] += case_diff;
+    } else {
+      // echo back 2nd port as upper case
+      if (islower(buf[i])) buf[i] -= case_diff;
+    }
+
+    tud_cdc_n_write_char(itf, buf[i]);
+    tud_cdc_n_write_char(itf, buf[i]);
+    tud_cdc_n_write_char(itf, buf[i]);
+  }
+  tud_cdc_n_write_flush(itf);
+}
+
+// Invoked when device is mounted
+void tud_mount_cb(void) {
+  blink_interval_ms = BLINK_MOUNTED;
+}
+
+// Invoked when device is unmounted
+void tud_umount_cb(void) {
+  blink_interval_ms = BLINK_NOT_MOUNTED;
+}
+
+static
+void
+cdc_task(void)
+{
+   for (int itf = 0; itf < CFG_TUD_CDC; itf++) {
+      // connected() check for DTR bit
+      // Most but not all terminal client set this when making connection
+      // if ( tud_cdc_n_connected(itf) )
+      {
+	 if (tud_cdc_n_available(itf)) {
+	    uint8_t buf[64];
+
+	    uint32_t count = tud_cdc_n_read(itf, buf, sizeof(buf));
+
+	    // echo back to both serial ports
+	    echo_serial_port(0, buf, count);
+	    echo_serial_port(1, buf, count);
+	 }
+      }
+   }
+}
+
+// Invoked when cdc when line state changed e.g connected/disconnected
+// Use to reset to DFU when disconnect with 1200 bps
+void tud_cdc_line_state_cb(uint8_t instance, bool dtr, bool rts) {
+  (void)rts;
+
+  // DTR = false is counted as disconnected
+  if (!dtr) {
+    // touch1200 only with first CDC instance (Serial)
+    if (instance == 0) {
+      cdc_line_coding_t coding;
+      tud_cdc_get_line_coding(&coding);
+      if (coding.bit_rate == 1200) {
+        if (board_reset_to_bootloader) {
+          board_reset_to_bootloader();
+        }
+      }
+    }
+  }
+}
+
+void
+notyet_tud_cdc_rx_cb(uint8_t itf) {
+   //gpio_put(LED_PIN, 1);	// On
+   //sleep_ms(100);
+   uint8_t buf[CFG_TUD_CDC_RX_BUFSIZE];
+   uint32_t count = tud_cdc_n_read(itf, buf, sizeof(buf));
+   if ((itf == 0) && (count > 0))
+      tud_cdc_n_write(itf, (const uint8_t *)"One\r\n", 5);
+   if ((itf == 1) && (count > 0))
+      tud_cdc_n_write(itf, (const uint8_t *)"Two\r\n", 5);
+   tud_cdc_n_write_flush(itf);
+}
+
+//---------------------------------------------------------------------
+
+void
+enable_pwm_3_125_MHz(
+   int			pin
+   )
+{
+   uint slice = pwm_gpio_to_slice_num(pin);
+   uint channel = pwm_gpio_to_channel(pin);
+
+   pwm_config cfg = pwm_get_default_config();
+
+   pwm_config_set_wrap(&cfg, 40);		// 125 / 40 = 3.125-MHz
+   pwm_init(slice, &cfg, false);
+
+   // Write after config, before enabling
+   pwm_set_chan_level(slice, channel, 20); // 50% duty cycle
+   pwm_init(slice, &cfg, true);
+   pwm_set_enabled(slice, true);
+
+   gpio_set_function(pin, GPIO_FUNC_PWM);	// Start driving pin.
+}
+
+void
+enable_pwm_counter_ms(
+   int			pin
+   )
+{
+   assert(pwm_gpio_to_channel(pin) == PWM_CHAN_B);
+
+   // Or exernal resistor required?
+   gpio_pull_down(pin);
+
+   uint slice = pwm_gpio_to_slice_num(pin);
+   pwm_config cfg = pwm_get_default_config();
+   pwm_config_set_clkdiv_mode(&cfg, PWM_DIV_B_RISING);
+   //pwm_config_set_clkdiv(&cfg, 1);
+   pwm_config_set_wrap(&cfg, 3125);
+   pwm_init(slice, &cfg, false);
+   gpio_set_function(pin, GPIO_FUNC_PWM); // Only safe after config
+   pwm_set_enabled(slice, true);
+
+   // enable intr
+   pwm_clear_irq(slice);
+   pwm_set_irq_enabled(slice, true);
+   irq_set_exclusive_handler(PWM_DEFAULT_IRQ_NUM(), pwm_intr_handler);
+   //irq_set_enabled(PWM_DEFAULT_IRQ_NUM(), true);
+
+}
+
+int
+main()
+{
+   //bi_decl(bi_program_description("rpi-modulo-cnc:pico-helloworld"));
+   //bi_decl(bi_1pin_with_name(LED_PIN, "On-board LED"));
 
    board_init();
-   tusb_init(/*BOARD_TUD_RHPORT, &dev_init*/);
-   if (board_init_after_tusb)
+
+   tusb_rhport_init_t dev_init = {
+      .role = TUSB_ROLE_DEVICE,
+      .speed = TUSB_SPEED_AUTO
+   };
+   tusb_init(BOARD_TUD_RHPORT, &dev_init);
+
+   if (board_init_after_tusb) {
       board_init_after_tusb();
+   }
 
    // sys_clk = 125 MHz...
    //uint32_t boot_sys_clk = clock_
@@ -58,59 +279,40 @@ int main() {
    //set_sys_clock_khz(125 * 1000, true);
    // pico-sdk/src/rp2_common/hardware_clocks/scripts/vcocalc.py 125.000
 
-   gpio_init(LED_PIN);
-   gpio_set_dir(LED_PIN, GPIO_OUT);
+   enable_led(LED_PIN);
 
-   PIO pio;
-   uint sm, offset;
-   (void) pio_claim_free_sm_and_add_program_for_gpio_range(&ws2812_program,
-							   &pio, &sm, &offset,
-							   WS2812_PIN, 1, true);
-   ws2812_program_init(pio, sm, offset, WS2812_PIN, 800000, IS_RGBW);
-
-   for (;;) {
-      put_pixel(pio, sm, 0x00000000);	// off
-      gpio_put(LED_PIN, 0);
-      sleep_ms(1000);
-
-      put_pixel(pio, sm, 0x22000000);	// green
-      gpio_put(LED_PIN, 1);
-      sleep_ms(1000);
-
-      put_pixel(pio, sm, 0x00220000);	// red
-      gpio_put(LED_PIN, 1);
-      sleep_ms(1000);
-
-      put_pixel(pio, sm, 0x00002200);	// blue
-      gpio_put(LED_PIN, 1);
-      sleep_ms(1000);
-
-      put_pixel(pio, sm, 0x00000022);	// -
-      gpio_put(LED_PIN, 1);
-      sleep_ms(1000);
-
+   // USB spec generally allows 500ms for a response, excepting
+   // startup/resume under 10ms, unless the host OS is lenient...
+   for (int i = 0; i < 500; i++) {
+      tud_task();
+      sleep_ms(1);
    }
 
-   // GP00 => UART0 TX output (debug)?
+   PIO pio;
+   uint sm;
+   enable_ws2812_pixel(&pio, &sm, WS2812_PIN);
 
+   // boot status to pixel?
+
+   // GP00 => UART0 TX output (debug)?
    // GP01 => 1-kHz interrupt source
    //	PWM0B = rising edge counter [0-3125) {supervisor or debug}
    //	GPIO input + interrupt {from psst command pulse = sync/fault}
-
    // GP02 => command /pulse => synch/fault
    // GP03 => command data-in
    // GP04 => command data-out
    // GP05 => command clock (3.125-MHz)
-/*
-   gpio_set_funtion(5, GPIO_FUNC_PWM);
-   uint slice_45 = pwm_gpio_to_slice_num(5);
-   pwm_set_wrap(slice_45, 40);			// 125-MHz / 40 = 3.125
-   pwm_set_chan_level(slice_45, PWM_CHAN_B, 20); // 50% duty cycle
-   pwm_set_enabled(slice_45, true);
-*/
    // GP06 => status /pulse => fault
    // GP07 => status data-in
    // GP08 => status data-out
+
+   // For test, generate 3.125-MHz out on GP05
+   enable_pwm_3_125_MHz(5);
+
+   // For test, externally wire the 3.125-MHz to GP01
+   // and interrupt on rising edge
+   // Note for test, it's driven push-pull
+   enable_pwm_counter_ms(1);
 
    // 9-28 => node specific
 
@@ -120,27 +322,109 @@ int main() {
 
    // PWM -> time counter input [0-10_000)
 
-   for (;;) {
-      gpio_put(LED_PIN, 0);	// Off
+/*
+   for (int i = 0; i < 15; i++) {
+      gpio_put(LED_PIN, 1);
       sleep_ms(100);
+      gpio_put(LED_PIN, 0);
+      sleep_ms(100);
+   }
+*/
+
+   int blinky_on_off = 1;
+   led_on_off(LED_PIN, blinky_on_off);
+
+   for (;;) {
+
+      // 50 => does not enumerate (mac)
+      //sleep_ms(50);
+      sleep_ms(100);
+      //sleep_ms(20);	-- nope.
+      //sleep_ms(5);	-- nope.
+      //sleep_ms(1);	// ok.
+      
+      // attach => 10ms
+      // ... D+ pull up = enabled
+      // ... D+ pulled down => enumerate...
+      // suspend => resume (VBUS) => 1 second
+      // suspend => resume (VBUS) => 10 ms (spec, ch5 and ch9)
+      // suspend => resume (VBUS) => 100 ms (last week thread)
+      // active => endpoint request => 500ms to repsond
+
+      blinky_on_off = 1 - blinky_on_off;
+      led_on_off(LED_PIN, blinky_on_off);
+
       tud_task();
+      cdc_task();
+
+      //sleep_ms(5);	// ok.
+
       //if (tud_cdc_n_connected(0)) {
-	 gpio_put(LED_PIN, 1);	// On
-	 sleep_ms(500);
       //}
+/*
+      switch ((pwm_count / 250) % 4) {
+      case 3:
+	 put_pixel(pio, sm, 0x00000000);	// off
+	 break;
+      case 2:
+	 put_pixel(pio, sm, 0x22000000);	// green
+	 break;
+      case 1:
+	 put_pixel(pio, sm, 0x00220000);	// red
+	 break;
+      case 0:
+	 put_pixel(pio, sm, 0x00002200);	// blue
+	 break;
+      }
+*/
+      //put_pixel(pio, sm, 0x00000022);	// -
+      //gpio_put(LED_PIN, 1);
+   }
+
+}
+
+//---------------------------------------------------------------------
+
+void sbfmt_putc(struct sbfmt_buffer *sb, char c) {
+   if (sb->p < sb->end) {
+      *(sb->p) = c;
+      sb->p++;
    }
 }
 
-void tud_cdc_rx_cb(uint8_t itf) {
-   gpio_put(LED_PIN, 1);	// On
-   sleep_ms(100);
-   uint8_t buf[CFG_TUD_CDC_RX_BUFSIZE];
-   uint32_t count = tud_cdc_n_read(itf, buf, sizeof(buf));
-   if ((itf == 0) && (count > 0))
-      tud_cdc_n_write(itf, (const uint8_t *)"One\r\n", 5);
-   if ((itf == 1) && (count > 0))
-      tud_cdc_n_write(itf, (const uint8_t *)"Two\r\n", 5);
-   tud_cdc_n_write_flush(itf);
+void sbfmt_puts(struct sbfmt_buffer *sb, const char *s) {
+   while (*s != '\0') {
+      sbfmt_putc(sb, *s);
+      s++;
+   }
 }
+
+void sbfmt_int(
+   struct sbfmt_buffer	*sb,
+   int			value,
+   int			width,
+   char			pad
+   )
+{
+   char tmp[16];
+   tmp[15] = '\0';
+   char *t = tmp+14;
+   int sign = (value < 0);
+   if (sign)
+      value = -value;
+   for (;;) {
+      *t = '0' + value % 10;
+      t--;
+      value /= 10;
+      if (value <= 0)
+	 break;
+   }
+   if (sign) {
+      *t = '-';
+      t--;
+   }
+   return sbfmt_puts(sb, t);
+}
+
 
 /**/

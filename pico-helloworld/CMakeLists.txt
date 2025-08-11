@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.17)
 
 include(pico_sdk_import.cmake)
 
@@ -19,13 +19,13 @@ add_executable(pico-helloworld
 # FBDIV:     125 (VCO = 1500.0 MHz)
 # PD1:       6
 # PD2:       2
-target_compile_definitions(pico-helloworld PRIVATE
-	PLL_SYS_REFDIV=1
-	PLL_SYS_VCO_FREQ_HZ=1500000000
-	PLL_SYS_POSTDIV1=6
-	PLL_SYS_POSTDIV2=2
-	SYS_CLK_HZ=125000000
-)
+#target_compile_definitions(pico-helloworld PRIVATE
+#	PLL_SYS_REFDIV=1
+#	PLL_SYS_VCO_FREQ_HZ=1500000000
+#	PLL_SYS_POSTDIV1=6
+#	PLL_SYS_POSTDIV2=2
+#	SYS_CLK_HZ=125000000
+#)
 
 pico_enable_stdio_usb(pico-helloworld 0)
 pico_enable_stdio_uart(pico-helloworld 0)
@@ -51,5 +51,7 @@ target_link_libraries(
 	pico_unique_id
 	tinyusb_device
 	tinyusb_board
+	hardware_gpio
 	hardware_pio
+	hardware_pwm
 )
