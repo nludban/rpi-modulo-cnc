@@ -363,6 +363,11 @@ main()
    }
 */
 
+   // Main loop - USB service, fault watchdog
+   // Interrupt by PSST - enqueue and/or forward
+   // Interrupt by 1-kHz - process steppers and commands
+   // Time synch: with idle PSST, restart interval pulse
+
    int blinky_on_off = 1;
    led_on_off(LED_PIN, blinky_on_off);
 
