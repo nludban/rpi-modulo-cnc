@@ -42,19 +42,19 @@ enable_led(
 void
 led_on(int pin)
 {
-//   gpio_put(pin, 1);
+   gpio_put(pin, 1);
 }
 
 void
 led_off(int pin)
 {
-//   gpio_put(pin, 0);
+   gpio_put(pin, 0);
 }
 
 void
 led_on_off(int pin, int on_off)
 {
-//   gpio_put(pin, !!on_off);
+   gpio_put(pin, !!on_off);
 }
 
 //--------------------------------------------------
@@ -118,7 +118,7 @@ pwm_intr_handler()
 {
    pwm_clear_irq(pwm_gpio_to_slice_num(1));
    pwm_count++;
-   put_pixel(0x22000000);	// green
+   //put_pixel(0x22000000);	// green
 }
 
 static
@@ -300,8 +300,8 @@ main()
    //set_sys_clock_khz(125 * 1000, true);
    // pico-sdk/src/rp2_common/hardware_clocks/scripts/vcocalc.py 125.000
 
-// enable_led(LED_PIN);
-   enable_pwm_10_Hz(LED_PIN);
+   enable_led(LED_PIN);
+   //enable_pwm_10_Hz(LED_PIN);
 
    // USB spec generally allows 500ms for a response, excepting
    // startup/resume under 10ms, unless the host OS is lenient...
@@ -335,14 +335,16 @@ main()
    // selector switch is on the tx=0 rx=1 side.
    enable_pwm_counter_ms(1);
 
+/*
    for (;;) {
-      //put_pixel(0x22000000);	// green
+      //put_pixel(0x22000000);	// green - by intr handler
       //sleep_ms(1000);
       put_pixel(0x00220000);	// red
       sleep_ms(1000);
       put_pixel(0x00002200);	// blue
       sleep_ms(1000);
    }
+*/
 
    // 9-28 => node specific
 
@@ -365,34 +367,19 @@ main()
    led_on_off(LED_PIN, blinky_on_off);
 
    for (;;) {
-
-      // 50 => does not enumerate (mac)
-      //sleep_ms(50);
-      sleep_ms(100);
-      //sleep_ms(20);	-- nope.
-      //sleep_ms(5);	-- nope.
-      //sleep_ms(1);	// ok.
+      sleep_ms(50);
       
-      // attach => 10ms
-      // ... D+ pull up = enabled
-      // ... D+ pulled down => enumerate...
-      // suspend => resume (VBUS) => 1 second
-      // suspend => resume (VBUS) => 10 ms (spec, ch5 and ch9)
-      // suspend => resume (VBUS) => 100 ms (last week thread)
-      // active => endpoint request => 500ms to repsond
-
       blinky_on_off = 1 - blinky_on_off;
       led_on_off(LED_PIN, blinky_on_off);
 
       tud_task();
       cdc_task();
 
-      //sleep_ms(5);	// ok.
-
       //if (tud_cdc_n_connected(0)) {
       //}
-/*
-      switch ((pwm_count / 250) % 4) {
+
+      // Cycle through 4 colors every 5 seconds
+      switch ((pwm_count / 1250) % 4) {
       case 3:
 	 put_pixel(0x00000000);	// off
 	 break;
@@ -406,7 +393,7 @@ main()
 	 put_pixel(0x00002200);	// blue
 	 break;
       }
-*/
+
       //put_pixel(0x00000022);	// -
       //gpio_put(LED_PIN, 1);
    }

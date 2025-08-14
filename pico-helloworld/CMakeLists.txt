@@ -19,13 +19,18 @@ add_executable(pico-helloworld
 # FBDIV:     125 (VCO = 1500.0 MHz)
 # PD1:       6
 # PD2:       2
-#target_compile_definitions(pico-helloworld PRIVATE
-#	PLL_SYS_REFDIV=1
-#	PLL_SYS_VCO_FREQ_HZ=1500000000
-#	PLL_SYS_POSTDIV1=6
-#	PLL_SYS_POSTDIV2=2
-#	SYS_CLK_HZ=125000000
-#)
+target_compile_definitions(pico-helloworld PRIVATE
+	PLL_SYS_REFDIV=1
+	PLL_SYS_VCO_FREQ_HZ=1500000000
+	PLL_SYS_POSTDIV1=6
+	PLL_SYS_POSTDIV2=2
+	SYS_CLK_HZ=125000000
+# Can manually change everything, but must meet specs, and may
+# break USB if any numbers are incorrect...
+#	PLL_SYS_POSTDIV1=5
+#	PLL_SYS_POSTDIV2=3
+#	SYS_CLK_HZ=100000000
+)
 
 pico_enable_stdio_usb(pico-helloworld 0)
 pico_enable_stdio_uart(pico-helloworld 0)
