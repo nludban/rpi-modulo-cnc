@@ -42,36 +42,37 @@ enable_led(
 void
 led_on(int pin)
 {
-   gpio_put(pin, 1);
+//   gpio_put(pin, 1);
 }
 
 void
 led_off(int pin)
 {
-   gpio_put(pin, 0);
+//   gpio_put(pin, 0);
 }
 
 void
 led_on_off(int pin, int on_off)
 {
-   gpio_put(pin, !!on_off);
+//   gpio_put(pin, !!on_off);
 }
 
 //--------------------------------------------------
 
+static PIO		pixel_pio;
+static uint		pixel_sm;
+
 void
 enable_ws2812_pixel(
-   PIO			*pio,
-   uint			*sm,
    int			pin
    )
 {
    uint offset;
    (void) pio_claim_free_sm_and_add_program_for_gpio_range(
       &ws2812_program,
-      pio, sm, &offset,
+      &pixel_pio, &pixel_sm, &offset,
       pin, 1, true);
-   ws2812_program_init(*pio, *sm, offset, pin, 800000, IS_RGBW);
+   ws2812_program_init(pixel_pio, pixel_sm, offset, pin, 800000, IS_RGBW);
 }
 
 
@@ -81,10 +82,11 @@ ws2812_rgb(uint32_t r, uint32_t g, uint32_t b) {
    return ((((g << 8) + r) << 8) + b) << 8;
 }
 
+static
 inline
 void
-put_pixel(PIO pio, uint sm, uint32_t grbx) {
-   pio_sm_put_blocking(pio, sm, grbx);
+put_pixel(uint32_t grbx) {
+   pio_sm_put_blocking(pixel_pio, pixel_sm, grbx);
 }
 
 //--------------------------------------------------
@@ -116,6 +118,7 @@ pwm_intr_handler()
 {
    pwm_clear_irq(pwm_gpio_to_slice_num(1));
    pwm_count++;
+   put_pixel(0x22000000);	// green
 }
 
 static
@@ -208,6 +211,26 @@ notyet_tud_cdc_rx_cb(uint8_t itf) {
 //---------------------------------------------------------------------
 
 void
+enable_pwm_10_Hz(
+   int			pin
+   )
+{
+   uint slice = pwm_gpio_to_slice_num(pin);
+   uint channel = pwm_gpio_to_channel(pin);
+
+   // Visible 10-Hz for validation
+   pwm_config cfg = pwm_get_default_config();
+   pwm_config_set_clkdiv_int(&cfg, 250);	// 500-kHz
+   pwm_config_set_wrap(&cfg, 50000);		// TOP => 10-Hz
+   pwm_init(slice, &cfg, false);		// Also, CC => 0.
+
+   gpio_set_function(pin, GPIO_FUNC_PWM);
+   pwm_set_chan_level(slice, channel, 25000);	// CC = 50% duty cycle
+   pwm_set_enabled(slice, true);
+   return;
+}
+
+void
 enable_pwm_3_125_MHz(
    int			pin
    )
@@ -216,16 +239,13 @@ enable_pwm_3_125_MHz(
    uint channel = pwm_gpio_to_channel(pin);
 
    pwm_config cfg = pwm_get_default_config();
-
    pwm_config_set_wrap(&cfg, 40);		// 125 / 40 = 3.125-MHz
    pwm_init(slice, &cfg, false);
 
-   // Write after config, before enabling
-   pwm_set_chan_level(slice, channel, 20); // 50% duty cycle
-   pwm_init(slice, &cfg, true);
-   pwm_set_enabled(slice, true);
-
    gpio_set_function(pin, GPIO_FUNC_PWM);	// Start driving pin.
+   pwm_set_chan_level(slice, channel, 20);	// 50% duty cycle
+   pwm_set_enabled(slice, true);
+   return;
 }
 
 void
@@ -233,25 +253,26 @@ enable_pwm_counter_ms(
    int			pin
    )
 {
+   uint slice = pwm_gpio_to_slice_num(pin);
    assert(pwm_gpio_to_channel(pin) == PWM_CHAN_B);
 
    // Or exernal resistor required?
    gpio_pull_down(pin);
 
-   uint slice = pwm_gpio_to_slice_num(pin);
+   // Interrupt on rising edge, 1-kHz from 3.125-MHz
    pwm_config cfg = pwm_get_default_config();
    pwm_config_set_clkdiv_mode(&cfg, PWM_DIV_B_RISING);
-   //pwm_config_set_clkdiv(&cfg, 1);
    pwm_config_set_wrap(&cfg, 3125);
+
    pwm_init(slice, &cfg, false);
-   gpio_set_function(pin, GPIO_FUNC_PWM); // Only safe after config
    pwm_set_enabled(slice, true);
+   gpio_set_function(pin, GPIO_FUNC_PWM); // Only safe after config
 
    // enable intr
    pwm_clear_irq(slice);
    pwm_set_irq_enabled(slice, true);
    irq_set_exclusive_handler(PWM_DEFAULT_IRQ_NUM(), pwm_intr_handler);
-   //irq_set_enabled(PWM_DEFAULT_IRQ_NUM(), true);
+   irq_set_enabled(PWM_DEFAULT_IRQ_NUM(), true);
 
 }
 
@@ -279,7 +300,8 @@ main()
    //set_sys_clock_khz(125 * 1000, true);
    // pico-sdk/src/rp2_common/hardware_clocks/scripts/vcocalc.py 125.000
 
-   enable_led(LED_PIN);
+// enable_led(LED_PIN);
+   enable_pwm_10_Hz(LED_PIN);
 
    // USB spec generally allows 500ms for a response, excepting
    // startup/resume under 10ms, unless the host OS is lenient...
@@ -288,9 +310,7 @@ main()
       sleep_ms(1);
    }
 
-   PIO pio;
-   uint sm;
-   enable_ws2812_pixel(&pio, &sm, WS2812_PIN);
+   enable_ws2812_pixel(WS2812_PIN);
 
    // boot status to pixel?
 
@@ -310,9 +330,19 @@ main()
    enable_pwm_3_125_MHz(5);
 
    // For test, externally wire the 3.125-MHz to GP01
-   // and interrupt on rising edge
    // Note for test, it's driven push-pull
+   // Metro rp2040: GP01/UART0-RX will be on "RX" board pin when the
+   // selector switch is on the tx=0 rx=1 side.
    enable_pwm_counter_ms(1);
+
+   for (;;) {
+      //put_pixel(0x22000000);	// green
+      //sleep_ms(1000);
+      put_pixel(0x00220000);	// red
+      sleep_ms(1000);
+      put_pixel(0x00002200);	// blue
+      sleep_ms(1000);
+   }
 
    // 9-28 => node specific
 
@@ -364,20 +394,20 @@ main()
 /*
       switch ((pwm_count / 250) % 4) {
       case 3:
-	 put_pixel(pio, sm, 0x00000000);	// off
+	 put_pixel(0x00000000);	// off
 	 break;
       case 2:
-	 put_pixel(pio, sm, 0x22000000);	// green
+	 put_pixel(0x22000000);	// green
 	 break;
       case 1:
-	 put_pixel(pio, sm, 0x00220000);	// red
+	 put_pixel(0x00220000);	// red
 	 break;
       case 0:
-	 put_pixel(pio, sm, 0x00002200);	// blue
+	 put_pixel(0x00002200);	// blue
 	 break;
       }
 */
-      //put_pixel(pio, sm, 0x00000022);	// -
+      //put_pixel(0x00000022);	// -
       //gpio_put(LED_PIN, 1);
    }
 
