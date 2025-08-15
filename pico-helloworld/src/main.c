@@ -153,28 +153,6 @@ void tud_umount_cb(void) {
   blink_interval_ms = BLINK_NOT_MOUNTED;
 }
 
-static
-void
-cdc_task(void)
-{
-   for (int itf = 0; itf < CFG_TUD_CDC; itf++) {
-      // connected() check for DTR bit
-      // Most but not all terminal client set this when making connection
-      // if ( tud_cdc_n_connected(itf) )
-      {
-	 if (tud_cdc_n_available(itf)) {
-	    uint8_t buf[64];
-
-	    uint32_t count = tud_cdc_n_read(itf, buf, sizeof(buf));
-
-	    // echo back to both serial ports
-	    echo_serial_port(0, buf, count);
-	    echo_serial_port(1, buf, count);
-	 }
-      }
-   }
-}
-
 // Invoked when cdc when line state changed e.g connected/disconnected
 // Use to reset to DFU when disconnect with 1200 bps
 void tud_cdc_line_state_cb(uint8_t instance, bool dtr, bool rts) {
@@ -195,16 +173,27 @@ void tud_cdc_line_state_cb(uint8_t instance, bool dtr, bool rts) {
   }
 }
 
+// tud_task() / tud_task_ext()
+// -> event.event_id == DCD_EVENT_XFER_COMPLETE
+// -> driver->xfer_cb(...)
+// -> cdcd_xfer_cb()
+// -> tud_cdc_rx_cb()
 void
-notyet_tud_cdc_rx_cb(uint8_t itf) {
-   //gpio_put(LED_PIN, 1);	// On
-   //sleep_ms(100);
-   uint8_t buf[CFG_TUD_CDC_RX_BUFSIZE];
-   uint32_t count = tud_cdc_n_read(itf, buf, sizeof(buf));
-   if ((itf == 0) && (count > 0))
-      tud_cdc_n_write(itf, (const uint8_t *)"One\r\n", 5);
-   if ((itf == 1) && (count > 0))
-      tud_cdc_n_write(itf, (const uint8_t *)"Two\r\n", 5);
+tud_cdc_rx_cb(uint8_t itf) {
+   uint8_t rxbuf[CFG_TUD_CDC_RX_BUFSIZE];
+   char ebuf[4];
+   for (;;) {
+      uint32_t count = tud_cdc_n_read(itf, rxbuf, sizeof(rxbuf));
+      if (count == 0)
+	 break;
+      for (int i = 0; i < count; i++) {
+	 SBFMT_BUFFER(b, ebuf, 0);
+	 sbfmt_putc(&b, ',');
+	 sbfmt_hex(&b, rxbuf[i], 8);
+	 tud_cdc_n_write(itf, ebuf, sbfmt_len(&b));
+      }
+   }
+   tud_cdc_n_write(itf, (const uint8_t *)"!\r\n", 3);
    tud_cdc_n_write_flush(itf);
 }
 
@@ -378,7 +367,7 @@ main()
       led_on_off(LED_PIN, blinky_on_off);
 
       tud_task();
-      cdc_task();
+      //cdc_task();	// Use callbacks.
 
       //if (tud_cdc_n_connected(0)) {
       //}
@@ -430,23 +419,43 @@ void sbfmt_int(
 {
    char tmp[16];
    tmp[15] = '\0';
-   char *t = tmp+14;
+   char *t = tmp+15;
    int sign = (value < 0);
    if (sign)
       value = -value;
    for (;;) {
-      *t = '0' + value % 10;
       t--;
+      *t = '0' + value % 10;
       value /= 10;
       if (value <= 0)
 	 break;
    }
    if (sign) {
-      *t = '-';
       t--;
+      *t = '-';
    }
    return sbfmt_puts(sb, t);
 }
 
+void
+sbfmt_hex(
+   struct sbfmt_buffer	*sb,
+   int			value,
+   int			nbits
+   )
+{
+   char tmp[16];
+   tmp[15] = '\0';
+   char *t = tmp+15;
+   for (int i= 0; i < nbits / 4; i++) {
+      int nib = value & 0xf;
+      t--;
+      *t = (nib < 10
+	    ? '0' + nib
+	    : 'a' + nib - 10);
+      value >>= 4;
+   }
+   return sbfmt_puts(sb, t);
+}
 
 /**/

@@ -22,7 +22,7 @@ struct sbfmt_buffer
       .buf = (b),			\
       .p = (b),				\
       .end = (b) + sizeof(b),		\
-      flags = (f),			\
+      .flags = (f),			\
    }
 
 inline const char * sbfmt_buf(const struct sbfmt_buffer *sb) {
@@ -37,6 +37,8 @@ void sbfmt_putc(struct sbfmt_buffer *sb, char c);
 void sbfmt_puts(struct sbfmt_buffer *sb, const char *s);
 void sbfmt_int(struct sbfmt_buffer *sb,
 	       int value, int width, char pad);
+void sbfmt_hex(struct sbfmt_buffer *sb,
+	       int value, int nbits);
 
 /*********************************************************************/
 #endif
